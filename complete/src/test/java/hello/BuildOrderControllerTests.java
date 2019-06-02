@@ -57,7 +57,7 @@ public class BuildOrderControllerTests {
     public void paramOrderShouldRepeatRequest() throws Exception {
     	
         this.mockMvc.perform(
-        		MockMvcRequestBuilders.post("/order")
+        		MockMvcRequestBuilders.post("/input")
         		.contentType(MediaType.APPLICATION_XML_VALUE)
         		.content("<root>Hello</root>"))
                 .andDo(print()).andExpect(status().isOk())
