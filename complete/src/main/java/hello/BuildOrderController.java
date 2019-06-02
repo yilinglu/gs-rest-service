@@ -6,7 +6,8 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -19,7 +20,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.w3c.dom.Document;
@@ -38,18 +38,63 @@ import org.xml.sax.SAXException;
 @RestController
 public class BuildOrderController<T extends Serializable> {
 
-    private static final String template = "Hello, %s!";
-    private final AtomicLong counter = new AtomicLong();
+    private HashMap<String, List<String>> projectGavs = new HashMap();
     
-    private HashMap<String, ArrayList<String>> deps = new HashMap();
-
-    @RequestMapping("/greeting")
-    public Greeting greeting(@RequestParam(value="name", defaultValue="World") String name) {
-        return new Greeting(counter.incrementAndGet(),
-                            String.format(template, name));
+    @RequestMapping(value = "/buildorder")
+    public String findBuildOrder() {
+    	List<String> buildOrder = new ArrayList<String>();
+    	String error = null;
+    	Set<String> keys = projectGavs.keySet();
+    	
+    	// Remove dependencies that are not a top level project, which is
+    	// projects among which we are figuring out the build sequences.
+    	for(String projectId : projectGavs.keySet()) {
+    		List<String> depsList = projectGavs.get(projectId);
+    		List<String> updatedDeps = 
+    				depsList.stream().filter(s -> keys.contains(s))
+    				.collect(Collectors.toList());
+    		
+    		projectGavs.put(projectId, updatedDeps);
+    	}
+    	
+    	
+    	while(projectGavs.size() > 0) {
+    		int preSize = buildOrder.size();
+        	//Project with zero length dependencies list is the next project that should be built.
+        	for(String projectId : projectGavs.keySet()) {
+        		if(projectGavs.get(projectId).size() == 0) {
+        			buildOrder.add(projectId);
+        		}
+        	}
+        	int afterSize = buildOrder.size();
+        	
+        	// remove all vertices that has no outgoing edges (dependencies) from the graph
+        	for(String projId: buildOrder) {
+        		projectGavs.remove(projId);
+        	}
+        	if(afterSize > preSize) {
+        		for(String projectId : projectGavs.keySet()) {
+        			projectGavs.get(projectId).removeAll(buildOrder);
+        		}
+        	}
+        	
+        	// Did not find any vertices that has no outgoing edges, but
+        	// the graph is not empty
+        	if(projectGavs.size() > 0 && afterSize == preSize) {
+        		error = "Error: Found circular dependency";
+        		projectGavs.clear();
+        	}
+    		
+    	}
+    	
+    	if(error != null) {
+    		return error;
+    	}
+    	
+    	return buildOrder.toString();
     }
 
-    @RequestMapping(value = "/input", method=RequestMethod.POST, 
+    @RequestMapping(value = "/pom", method=RequestMethod.POST, 
     		consumes = {MediaType.APPLICATION_XML_VALUE})
     public @ResponseBody ResponseEntity<String> post(@RequestBody String raw) {
     	
@@ -65,21 +110,23 @@ public class BuildOrderController<T extends Serializable> {
 			if(projectNodes.getLength() > 0) {
 				
 				Node projectNode = projectNodes.item(0);
-				String projectId = buildIdFromDepNode(projectNode);
+				String projectId = buildGav(projectNode);
+				
 				if(StringUtils.isNotEmpty(projectId)) {
 					
-					if(deps.get(projectId) != null) {
+					if(projectGavs.get(projectId) != null) {
 						System.out.println(String.format("Project Id %s is overwritten by latest pom file.", projectId));
 					} 
 					System.out.println(String.format("Project Id: %s ", projectId));
-					deps.put(projectId, new ArrayList<String>());
+					projectGavs.put(projectId, new ArrayList<String>());
 					
 					if(doc.getElementsByTagName("dependencies").getLength() > 0) {
+						
 						NodeList dependencies = doc.getElementsByTagName("dependencies").item(0).getChildNodes();
 						for(int i = 0; i < dependencies.getLength(); i++) {
-							String depId = buildIdFromDepNode(dependencies.item(i));
+							String depId = buildGav(dependencies.item(i));
 							if(StringUtils.isNotEmpty(depId)) {
-								deps.get(projectId).add(depId);
+								projectGavs.get(projectId).add(depId);
 								System.out.println(String.format("dep: %s", depId));
 							}
 						}
@@ -99,13 +146,14 @@ public class BuildOrderController<T extends Serializable> {
     }
     
     /**
-     * Given a node that has <groupId> <artifactId> and <version> (optional) as child nodes
-     * Build a unique identifier
+     * Given a node that has <groupId> <artifactId> and <version> (optional) as child nodes,
+     * build a unique identifier that is concatenation of the element text content with | as 
+     * the separator.
      * 
      * @param depNode
      * @return
      */
-    private String buildIdFromDepNode(Node parentNode) {
+    private String buildGav(Node parentNode) {
     	List<String> list = new ArrayList<String>();
     	
 		NodeList children = parentNode.getChildNodes();
