@@ -1,4 +1,4 @@
-package hello;
+package com;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
