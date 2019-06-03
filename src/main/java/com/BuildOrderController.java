@@ -29,8 +29,7 @@ import org.xml.sax.SAXException;
 
 /**
  * For remote debugging, use the following command:
- * java -Xdebug -Xrunjdwp:server=y,transport=dt_socket,address=8081,suspend=n -jar gs-rest-service-0.1.0.jar
-
+ * java -Xdebug -Xrunjdwp:server=y,transport=dt_socket,address=8080,suspend=n -jar build-order-service-0.1.0.jar
  * 
  * @author yilinglu
  *
@@ -38,8 +37,13 @@ import org.xml.sax.SAXException;
 @RestController
 public class BuildOrderController<T extends Serializable> {
 
-    private HashMap<String, List<String>> projectGavs = new HashMap();
+    private HashMap<String, List<String>> projectGavs = new HashMap<String, List<String>>();
     
+    /**
+     * 
+     * @return An array representing the build order, index 0 is the first to be built.
+     * Error message if circular dependency was found.
+     */
     @RequestMapping(value = "/buildorder")
     public String findBuildOrder() {
     	List<String> buildOrder = new ArrayList<String>();
@@ -72,6 +76,7 @@ public class BuildOrderController<T extends Serializable> {
         	for(String projId: buildOrder) {
         		projectGavs.remove(projId);
         	}
+        	// remove all edges that are connected to these edges that has no outgoing edges.
         	if(afterSize > preSize) {
         		for(String projectId : projectGavs.keySet()) {
         			projectGavs.get(projectId).removeAll(buildOrder);
@@ -79,7 +84,7 @@ public class BuildOrderController<T extends Serializable> {
         	}
         	
         	// Did not find any vertices that has no outgoing edges, but
-        	// the graph is not empty
+        	// the graph is not empty - this is a cyclic graph.
         	if(projectGavs.size() > 0 && afterSize == preSize) {
         		error = "Error: Found circular dependency";
         		projectGavs.clear();
@@ -94,6 +99,13 @@ public class BuildOrderController<T extends Serializable> {
     	return buildOrder.toString();
     }
 
+    /**
+     * Post one or more pom.xml files that are to be placed into the CI pipeline.
+     * The same pom.xml can safely be posted more than once
+     * 
+     * @param raw pom.xml 
+     * @return
+     */
     @RequestMapping(value = "/pom", method=RequestMethod.POST, 
     		consumes = {MediaType.APPLICATION_XML_VALUE})
     public @ResponseBody ResponseEntity<String> post(@RequestBody String raw) {
@@ -133,13 +145,17 @@ public class BuildOrderController<T extends Serializable> {
 					}
 					
 				}
-				
 			}
 			
-		} catch (ParserConfigurationException | SAXException | IOException e) {
+		} catch (ParserConfigurationException | SAXException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
-		}
+	        return new ResponseEntity<String>(raw, HttpStatus.BAD_REQUEST);
+	    } catch (IOException e) {
+	    	// TODO Auto-generated catch block
+	    	e.printStackTrace();
+	    	return new ResponseEntity<String>(raw, HttpStatus.INTERNAL_SERVER_ERROR);
+	    }
         
     	
         return new ResponseEntity<String>(raw, HttpStatus.OK);

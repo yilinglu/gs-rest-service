@@ -1,0 +1,6 @@
+.mvn
+.vscode
+target
+*.md
+*.adoc
+.travis.yml

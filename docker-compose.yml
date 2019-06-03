@@ -1,0 +1,9 @@
+version: "3"
+services:
+  build-order-service:
+    container_name: build-order-service-container
+    build:
+      context: .
+    ports:
+      - "8080:8080"
+    command: ["java", "-jar", "/app/target/build-order-service-0.1.0.jar"]
